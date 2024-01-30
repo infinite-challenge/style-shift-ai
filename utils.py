@@ -1,11 +1,8 @@
-
 import collections.abc as container_abcs
 from itertools import repeat
 
-def compute_mean_std(feature, eps=1e-6):
-    """
-    compute features' mean and standard deviation
-    """
+# compute features' mean and standard deviation
+def compute_mean_std(feature : list, eps : float = 1e-5):
     size = feature.size()
     assert (len(size) == 4)
     N, C = size[:2]
@@ -14,15 +11,13 @@ def compute_mean_std(feature, eps=1e-6):
     feature_mean = feature.view(N, C, -1).mean(dim=2).view(N,C,1,1)
     return feature_mean, feature_std
 
-def normalize(feature, eps=1e-5):
-    """
-    normalized feature by using mean std
-    """
+# normalized feature by using mean std
+def normalize(feature : list, eps : float = 1e-5):
     feature_mean, feature_std = compute_mean_std(feature, eps)
     normalized = (feature-feature_mean)/feature_std
     return normalized
 
-def _ntuple(n):
+def _ntuple(n : int):
     def parse(x):
         if isinstance(x, container_abcs.Iterable):
             return x
