@@ -173,4 +173,17 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+# input output directory
+input/
+output/
+out/
+content/
+style/
+data/
+
+# pretrained model
+*.pth
+pretrained/
+experiement/
+
 # End of https://www.toptal.com/developers/gitignore/api/python
