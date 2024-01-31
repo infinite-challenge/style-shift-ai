@@ -1,5 +1,14 @@
 import collections.abc as container_abcs
 from itertools import repeat
+import torch
+from collections import OrderedDict
+
+def load_dict(module, file_path : str):
+    new_file_dict = OrderedDict()
+    file_dict = torch.load(file_path)
+    for key, value in file_dict.items():
+        new_file_dict[key] = value
+    return module.load_state_dict(new_file_dict)
 
 # compute features' mean and standard deviation
 def compute_mean_std(feature : list, eps : float = 1e-5):
