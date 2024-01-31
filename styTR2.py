@@ -2,33 +2,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import numpy as np
-from util import *
+from utils import *
 
-############################
-# Image to patch embedding #
-############################
-class embedding(nn.Moduel):
-    """
-    To use Embedding,
-    embedding = *.embedding()
-    """
-    def __init__(self, img_size = 256, patch_size=8, in_channels=3, embedding_dimension=512):
-        super().__init__()
-        img_size = to_2tuple(img_size)
-        patch_size = to_2tuple(patch_size)
-        n_patch = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.n_patch = n_patch
-        self.proj = nn.Conv2d(in_channels, embedding_dimension, kernel_size=patch_size, stride=patch_size)
-        self.up1 = nn.Upsample(scale_factor=2, mode='nearest')
-
-    def forward(self, x):
-        B, C, H, W = x.shape
-        x = self.proj(x)
-        return x
-    
 #######################################
 # Style Transforms Transformer Module #
 #######################################
@@ -77,7 +52,7 @@ class StyTrans(nn.Module):
         """ 
         compute mse_loss between input(decoder output) and target(original style)
         """
-        assert (input.size()) == target.size())
+        assert input.size() == target.size()
         assert (target.requires_grad is False)
         input_mean, input_std = compute_mean_std(input)
         target_mean, target_std = compute_mean_std(target)
