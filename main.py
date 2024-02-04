@@ -27,8 +27,10 @@ import argparse
 import lightning as pl
 from collections import OrderedDict
 
-from dataloader import ImageDataModule, LitCIFAR10DataModule
+from dataloader import ImageDataModule, LitCIFAR10DataModule, CustomImageDataset
+from model.sampler import InfiniteSampleWrapper
 
+from tqdm import tqdm
 import pdb
 
 parser = argparse.ArgumentParser()
@@ -50,6 +52,8 @@ parser.add_argument('--decoder_path', type=str, default='experiments/decoder_ite
 parser.add_argument('--trans_path', type=str, default='experiments/transformer_iter_160000.pth')
 parser.add_argument('--embedding_path', type=str, default='experiments/embedding_iter_160000.pth')
 
+parser.add_argument('--lr', type=float, default=5e-4)
+parser.add_argument('--lr_decay', type=float, default=1e-5)
 parser.add_argument('--style_interpolation_weight', type=str, default="")
 parser.add_argument('--a', type=float, default=1.0)
 parser.add_argument('--position_embedding', default='sine', type=str, choices=('sine','learned'),
@@ -185,40 +189,104 @@ class LightningStyleShift(pl.LightningModule):
 
         self.training_step_outputs.clear()
 
-mode = args.mode # train or test
+def data_transform():
+    transfrom_list = [
+        transforms.Resize(size = (512, 512)),
+        transforms.RandomCrop(256),
+        transforms.ToTensor()
+    ]
+    return transforms.Compose(transfrom_list)
+
+def imgtensor2pil(img_tensor):
+    pil_img = transforms.ToPILImage()(img_tensor)
+    return pil_img
+
+mode = args.mode
 output_path = args.output
+
+content_weight : float = 7.0
+style_weight : float = 10.0
+l_identity1_weight : float = 70.0
+l_identity2_weight : float = 1.0
 
 if not os.path.exists(output_path):
     os.makedirs(output_path)
 
 if __name__ == '__main__':
 
-    if mode == 'train':        
-        # load the data
-            
-        data_module = ImageDataModule(args.content, args.style, batch_size=4, num_workers=NUM_WORKERS)
-        dataset = LitCIFAR10DataModule(batch_size=4, num_workers=NUM_WORKERS)
-        # data_tf = data_transform()
+    if mode == 'train':    
+        network = styTR2.StyTrans(vgg.vgg, decoder.decoder, PatchEmbedding(), Transformer())
 
-        # content_dataset = CustomImageDataset(args.content, data_tf)
-        # style_dataset = CustomImageDataset(args.style, data_tf)
+        optimizer = torch.optim.Adam([
+            {'params': network.decoder.parameters()},
+            {'params': network.transformer.parameters()},
+            {'params': network.embedding.parameters()},
+        ], lr=args.lr)    
+        # load the data
+        for epoch in tqdm(range(10)):
+            if epoch < 1e4:
+                lr = args.lr * 0.1 * (1.0 + 3e-4 * epoch)
+            else:
+                lr = 2e-4 / (1.0 + args.lr_decay * (epoch- 1e4))
+            
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr
+            
+            data_tf = data_transform()
+            content_dataset = CustomImageDataset("./content", data_tf)
+            style_dataset = CustomImageDataset("./style", data_tf)
+
+            content = data.DataLoader(
+                content_dataset, batch_size = 8,
+                # sampler=InfiniteSampleWrapper(content_dataset), 
+                num_workers=0)
+            style = data.DataLoader(
+                style_dataset, batch_size = 8,
+                # sampler=InfiniteSampleWrapper(style_dataset), 
+                num_workers=0)
+                        
+            # image_batch = zip(content, style)
+            # pdb.set_trace()            
+            # content, style = data_module.train_dataloader()
+
+            Ics, loss_c, loss_s, loss_l1, loss_l2 = network(content, style)
+
+            if epoch % 5 == 0:
+                output_name = '{:s}/test/{:s}{:s}'.format(
+                                args.save_dir, str(epoch),".jpg"
+                            )
+                out = torch.cat((content,Ics),0)
+                out = torch.cat((style,out),0)
+                save_image(out, output_name)
+
+            loss_c = content_weight * loss_c
+            loss_s = style_weight * loss_s
+            loss_l1 = l_identity1_weight * loss_l1
+            loss_l2 = l_identity2_weight * loss_l2
+            loss = loss_c + loss_s + loss_l1 + loss_l2
+
+            print(loss.sum().cpu().detach().numpy(),"-content:",loss_c.sum().cpu().detach().numpy(),"-style:",loss_s.sum().cpu().detach().numpy()
+              ,"-l1:",loss_l1.sum().cpu().detach().numpy(),"-l2:",loss_l2.sum().cpu().detach().numpy()
+              )
+            
+            optimizer.zero_grad()
+            loss.sum().backward()
+            optimizer.step()
+        # content_dataset = ImageDataModule(args.content, data_tf)
+        # style_dataset = ImageDataModule(args.style, data_tf)
 
         # content = data.DataLoader(
         #     content_dataset, batch_size = 4,
-        #     # sampler=InfiniteSampleWrapper(content_dataset), 
+        #     sampler=InfiniteSampleWrapper(content_dataset), 
         #     num_workers=8)
         # style = data.DataLoader(
         #     style_dataset, batch_size = 4,
-        #     # sampler=InfiniteSampleWrapper(style_dataset), 
+        #     sampler=InfiniteSampleWrapper(style_dataset), 
         #     num_workers=8)
 
         # image_batch = zip(content, style)
 
         # load the model
-        network = LightningStyleShift(vgg.vgg, decoder.decoder, PatchEmbedding(), Transformer(), output_path=output_path)
-        trainer = pl.Trainer(max_epochs=200, num_nodes=1)
-
-        trainer.fit(network, dataset)
 
     elif mode == 'test':
         # load the state dict
