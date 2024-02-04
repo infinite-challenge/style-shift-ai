@@ -3,6 +3,7 @@ from torch.utils import data
 
 def InfiniteSampler(n):
     # i = 0
+
     i = n - 1
     order = np.random.permutation(n)
     while True:
@@ -12,6 +13,11 @@ def InfiniteSampler(n):
             np.random.seed()
             order = np.random.permutation(n)
             i = 0
+
+def FiniteSampler(n):
+    order = np.random.permutation(n)
+    for i in range(n):
+        yield order[i]
 
 class InfiniteSampleWrapper(data.sampler.Sampler):
     def __init__(self, data_source):
