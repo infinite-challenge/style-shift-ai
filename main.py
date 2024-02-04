@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 import os
-from typing import Any
+from typing import Any, Optional
 from lightning.pytorch.utilities.types import LRSchedulerTypeUnion
 import torch
 import torch.nn as nn
@@ -10,6 +10,7 @@ from PIL import Image
 
 from os.path import basename, splitext
 
+from torch.utils import data
 from torchvision import transforms
 from torchvision.utils import save_image
 
@@ -17,7 +18,7 @@ import model.decoder as decoder
 import model.vgg as vgg
 from model.patch_embedding import PatchEmbedding
 from model.transformer import Transformer
-from utils import data_transform, content_transform
+from utils import data_transform, content_transform, img_tensor_2_pil
 
 import styTR2
 
@@ -26,6 +27,9 @@ import argparse
 import lightning as pl
 from collections import OrderedDict
 
+from dataloader import ImageDataModule, LitCIFAR10DataModule
+
+import pdb
 
 parser = argparse.ArgumentParser()
 
@@ -61,6 +65,10 @@ save_extension = '.jpg'
 output_path = args.output
 preserve_color = 'store_true'
 alpha = args.a
+NUM_WORKERS=int(os.cpu_count()/2)
+
+random_seed = 42
+torch.manual_seed(random_seed)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -109,11 +117,14 @@ class LightningStyleShift(pl.LightningModule):
         return [optimizer], [scheduler]
 
     def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: Any | None) -> None:
-        scheduler.step(epoch=self.current_epoch)
+        scheduler.step()
 
-    def training_step(self, batch, batch_idx, dataloader_idx):
-
+    def training_step(self, batch, batch_idx):
+        
         content, style = batch
+        content = content[0]
+        style = style[0]
+        # content, style = batch
 
         Ics, loss_c, loss_s, loss_l1, loss_l2 = self.model(content, style)
 
@@ -127,6 +138,7 @@ class LightningStyleShift(pl.LightningModule):
         # training output save
         out = torch.cat((content, Ics), dim=0)
         out = torch.cat((style, out), dim=0)
+
         self.training_step_outputs.append(out.to('cpu'))
 
         self.log_dict({
@@ -135,18 +147,26 @@ class LightningStyleShift(pl.LightningModule):
             'loss_s': loss_s,
             'loss_l1': loss_l1,
             'loss_l2': loss_l2,
-        }, on_step=True, on_epoch=True, prog_bar=True, logger=True)
+        }, on_step=True, prog_bar=True, on_epoch=True, logger=True)
 
         return loss
     
     def forward(self, content, style):
         return self.model(content, style)
     
+    def on_train_epoch_start(self):
+        print(f'epoch: {self.current_epoch}')
+
+    def on_train_batch_start(self, batch: Any, batch_idx: int) -> int | None:
+        print(f'batch_idx: {batch_idx}')
+        print(f'epoch: {self.current_epoch}')
+
     def on_train_epoch_end(self):
         # every 100 epochs, save the output
-        if self.current_epoch % 100 == 0:
-            output_file = f'{self.output_path}/epoch_{self.current_epoch}.jpg'
-            save_image(self.training_step_outputs[0], output_file)
+        if self.current_epoch % 2 == 0:
+            output_file = f'{self.output_path}/epoch_{self.current_epoch}'
+            for i in range(len(self.training_step_outputs)):
+                save_image(self.training_step_outputs[i], output_file+f'_{i}.jpg')
 
         # every 1000 epochs, save the state dict
         if self.current_epoch % 1000 == 0 and self.current_epoch != 0:
@@ -163,7 +183,6 @@ class LightningStyleShift(pl.LightningModule):
                 decoder_dict[key] = decoder_dict[key].to('cpu')
             torch.save(decoder_dict, f'{self.output_path}/decoder_iter_{self.current_epoch}.pth')
 
-
         self.training_step_outputs.clear()
 
 mode = args.mode # train or test
@@ -175,10 +194,31 @@ if not os.path.exists(output_path):
 if __name__ == '__main__':
 
     if mode == 'train':        
+        # load the data
+            
+        data_module = ImageDataModule(args.content, args.style, batch_size=4, num_workers=NUM_WORKERS)
+        dataset = LitCIFAR10DataModule(batch_size=4, num_workers=NUM_WORKERS)
+        # data_tf = data_transform()
+
+        # content_dataset = CustomImageDataset(args.content, data_tf)
+        # style_dataset = CustomImageDataset(args.style, data_tf)
+
+        # content = data.DataLoader(
+        #     content_dataset, batch_size = 4,
+        #     # sampler=InfiniteSampleWrapper(content_dataset), 
+        #     num_workers=8)
+        # style = data.DataLoader(
+        #     style_dataset, batch_size = 4,
+        #     # sampler=InfiniteSampleWrapper(style_dataset), 
+        #     num_workers=8)
+
+        # image_batch = zip(content, style)
+
         # load the model
         network = LightningStyleShift(vgg.vgg, decoder.decoder, PatchEmbedding(), Transformer(), output_path=output_path)
+        trainer = pl.Trainer(max_epochs=200, num_nodes=1)
 
-        trainer = pl.Trainer(max_epochs=160000, num_nodes=1)
+        trainer.fit(network, dataset)
 
     elif mode == 'test':
         # load the state dict

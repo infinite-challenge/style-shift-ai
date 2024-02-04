@@ -53,4 +53,8 @@ def _ntuple(n : int):
         return tuple(repeat(x, n))
     return parse
 
+def img_tensor_2_pil(img_tensor : torch.Tensor):
+    pil_img = transforms.ToPILImage()(img_tensor)
+    return pil_img
+
 to_2tuple = _ntuple(2)

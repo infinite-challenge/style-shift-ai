@@ -3,7 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 from utils import *
-
+import pdb
 #######################################
 # Style Transforms Transformer Module #
 #######################################
@@ -12,7 +12,7 @@ class StyTrans(nn.Module):
     To use style transforms transformer,
     ex) network = *.StyTrans(...)
     """
-    def __init__(self, cnn, decoder, embedding, transformer, args):
+    def __init__(self, cnn, decoder, embedding, transformer):
         super().__init__()
         cnn_layers = list(cnn.children())
         self.cnn_1 = nn.Sequential(*cnn_layers[:4])
@@ -26,7 +26,7 @@ class StyTrans(nn.Module):
                 param.requires_grad = False
 
         self.mse_loss = nn.MSELoss()
-        self.tranformer = transformer
+        self.transformer = transformer
         self.decoder = decoder
         self.embedding = embedding
 
@@ -72,9 +72,10 @@ class StyTrans(nn.Module):
         embed_position_c = None
         embed_position_s = None
         mask = None
-        Ics = self.decoder(self.transformer(style, mask, content, embed_position_c, embed_position_s))
+        hs = self.transformer(style, content, mask, embed_position_c, embed_position_s)
+        Ics = self.decoder(self.transformer(style, content, mask, embed_position_c, embed_position_s))
+        
         Ics_features = self.checkpt_of_ecnoder(Ics)
-
         loss_c = 0
         for i in [-1, -2]:
             loss_c += self.compute_content_loss(normalize(Ics_features[i]), 
@@ -84,8 +85,8 @@ class StyTrans(nn.Module):
             loss_s += self.compute_style_loss(Ics_features[i], 
                                               style_features[i])
         
-        Icc = self.decoder(self.transformer(content, mask, content, embed_position_c, embed_position_c))
-        Iss = self.decoder(self.transformer(style, mask, style, embed_position_s, embed_position_s))
+        Icc = self.decoder(self.transformer(content, content, mask, embed_position_c, embed_position_c))
+        Iss = self.decoder(self.transformer(style, style, mask, embed_position_s, embed_position_s))
 
         Icc_features = self.checkpt_of_ecnoder(Icc)
         Iss_features = self.checkpt_of_ecnoder(Iss)
