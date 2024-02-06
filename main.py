@@ -105,11 +105,11 @@ class LightningStyleShift(pl.LightningModule):
     def foward(self, content, style):
         return self.model(content, style)
 
-    def evaluate_custom_lr_lambda(self, epoch):
-        if epoch < 1e4:
-            return 0.1 * (1.0 + 3e-4 * epoch)
+    def evaluate_custom_lr_lambda(self, batch_idx):
+        if batch_idx < 1e4:
+            return 0.1 * (1.0 + 3e-4 * batch_idx)
         else:
-            return 2e-4 / self.lr / (1.0 + self.lr_decay * (epoch - 1e4)) 
+            return 2e-4 / self.lr / (1.0 + self.lr_decay * (batch_idx - 1e4)) 
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam([
@@ -118,16 +118,17 @@ class LightningStyleShift(pl.LightningModule):
             {'params': self.model.embedding.parameters()},
         ], lr=self.lr)
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=self.evaluate_custom_lr_lambda)
-        return [optimizer], [scheduler]
+        lr_scheduler_config = {
+            'scheduler': scheduler,
+            'interval': 'step',
+            'frequency': 1,
+        }
 
-    def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: Any | None) -> None:
-        scheduler.step()
+        return [optimizer], [lr_scheduler_config]
 
     def training_step(self, batch, batch_idx):
-        
+
         content, style = batch
-        content = content[0]
-        style = style[0]
         # content, style = batch
 
         Ics, loss_c, loss_s, loss_l1, loss_l2 = self.model(content, style)
@@ -151,51 +152,34 @@ class LightningStyleShift(pl.LightningModule):
             'loss_s': loss_s,
             'loss_l1': loss_l1,
             'loss_l2': loss_l2,
-        }, on_step=True, prog_bar=True, on_epoch=True, logger=True)
+        }, on_step=True, prog_bar=True, logger=True)
 
         return loss
     
     def forward(self, content, style):
         return self.model(content, style)
-    
-    def on_train_epoch_start(self):
-        print(f'epoch: {self.current_epoch}')
 
-    def on_train_batch_start(self, batch: Any, batch_idx: int) -> int | None:
-        print(f'batch_idx: {batch_idx}')
-        print(f'epoch: {self.current_epoch}')
+    def on_train_batch_end(self, output, batch, batch_idx): 
 
-    def on_train_epoch_end(self):
-        # every 100 epochs, save the output
-        if self.current_epoch % 2 == 0:
-            output_file = f'{self.output_path}/epoch_{self.current_epoch}'
-            for i in range(len(self.training_step_outputs)):
-                save_image(self.training_step_outputs[i], output_file+f'_{i}.jpg')
+        output_file = f'{self.output_path}/img/batch_{batch_idx}'
+        for i, img in enumerate(self.training_step_outputs):    
+            save_image(img, output_file+f'_{i}.jpg')
 
-        # every 1000 epochs, save the state dict
-        if self.current_epoch % 1000 == 0 and self.current_epoch != 0:
+        if batch_idx % 100 == 0 and batch_idx > 0:
             transformer_dict = self.model.transformer.state_dict()
             for key in transformer_dict.keys():
                 transformer_dict[key] = transformer_dict[key].to('cpu')
-            torch.save(transformer_dict, f'{self.output_path}/transformer_iter_{self.current_epoch}.pth')
+            torch.save(transformer_dict, f'{self.output_path}/trained/transformer_iter_{batch_idx}.pth')
             embedding_dict = self.model.embedding.state_dict()
             for key in embedding_dict.keys():
                 embedding_dict[key] = embedding_dict[key].to('cpu')
-            torch.save(embedding_dict, f'{self.output_path}/embedding_iter_{self.current_epoch}.pth')
+            torch.save(embedding_dict, f'{self.output_path}/trained/embedding_iter_{batch_idx}.pth')
             decoder_dict = self.model.decoder.state_dict()
             for key in decoder_dict.keys():
                 decoder_dict[key] = decoder_dict[key].to('cpu')
-            torch.save(decoder_dict, f'{self.output_path}/decoder_iter_{self.current_epoch}.pth')
+            torch.save(decoder_dict, f'{self.output_path}/trained/decoder_iter_{batch_idx}.pth')
 
         self.training_step_outputs.clear()
-
-def data_transform():
-    transfrom_list = [
-        transforms.Resize(size = (512, 512)),
-        transforms.RandomCrop(256),
-        transforms.ToTensor()
-    ]
-    return transforms.Compose(transfrom_list)
 
 def imgtensor2pil(img_tensor):
     pil_img = transforms.ToPILImage()(img_tensor)
@@ -212,95 +196,35 @@ l_identity2_weight : float = 1.0
 if not os.path.exists(output_path):
     os.makedirs(output_path)
 
+if not os.path.exists(output_path + '/img'):
+    os.makedirs(output_path + '/img')
+
+if not os.path.exists(output_path + '/trained'):
+    os.makedirs(output_path + '/trained')
+
 if __name__ == '__main__':
 
-    if mode == 'train':    
-        network = styTR2.StyTrans(vgg.vgg, decoder.decoder, PatchEmbedding(), Transformer())
+    vgg_model = vgg.vgg 
+    vgg_model.load_state_dict(torch.load(args.vgg))
+    vgg_model = nn.Sequential(*list(vgg_model.children())[:44])
 
-        optimizer = torch.optim.Adam([
-            {'params': network.decoder.parameters()},
-            {'params': network.transformer.parameters()},
-            {'params': network.embedding.parameters()},
-        ], lr=args.lr)    
-        # load the data
-        for epoch in tqdm(range(10)):
-            if epoch < 1e4:
-                lr = args.lr * 0.1 * (1.0 + 3e-4 * epoch)
-            else:
-                lr = 2e-4 / (1.0 + args.lr_decay * (epoch- 1e4))
-            
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr
-            
-            data_tf = data_transform()
-            content_dataset = CustomImageDataset("./content", data_tf)
-            style_dataset = CustomImageDataset("./style", data_tf)
+    if mode == 'train':  
 
-            content = data.DataLoader(
-                content_dataset, batch_size = 8,
-                # sampler=InfiniteSampleWrapper(content_dataset), 
-                num_workers=0)
-            style = data.DataLoader(
-                style_dataset, batch_size = 8,
-                # sampler=InfiniteSampleWrapper(style_dataset), 
-                num_workers=0)
-                        
-            # image_batch = zip(content, style)
-            # pdb.set_trace()            
-            # content, style = data_module.train_dataloader()
+        model = LightningStyleShift(vgg_model, decoder.decoder, PatchEmbedding(), Transformer(), content_weight, style_weight, l_identity1_weight, l_identity2_weight, args.lr, args.lr_decay, output_path)
+        dm = ImageDataModule(args.content, args.style, batch_size = 4, num_workers = NUM_WORKERS)
 
-            Ics, loss_c, loss_s, loss_l1, loss_l2 = network(content, style)
-
-            if epoch % 5 == 0:
-                output_name = '{:s}/test/{:s}{:s}'.format(
-                                args.save_dir, str(epoch),".jpg"
-                            )
-                out = torch.cat((content,Ics),0)
-                out = torch.cat((style,out),0)
-                save_image(out, output_name)
-
-            loss_c = content_weight * loss_c
-            loss_s = style_weight * loss_s
-            loss_l1 = l_identity1_weight * loss_l1
-            loss_l2 = l_identity2_weight * loss_l2
-            loss = loss_c + loss_s + loss_l1 + loss_l2
-
-            print(loss.sum().cpu().detach().numpy(),"-content:",loss_c.sum().cpu().detach().numpy(),"-style:",loss_s.sum().cpu().detach().numpy()
-              ,"-l1:",loss_l1.sum().cpu().detach().numpy(),"-l2:",loss_l2.sum().cpu().detach().numpy()
-              )
-            
-            optimizer.zero_grad()
-            loss.sum().backward()
-            optimizer.step()
-        # content_dataset = ImageDataModule(args.content, data_tf)
-        # style_dataset = ImageDataModule(args.style, data_tf)
-
-        # content = data.DataLoader(
-        #     content_dataset, batch_size = 4,
-        #     sampler=InfiniteSampleWrapper(content_dataset), 
-        #     num_workers=8)
-        # style = data.DataLoader(
-        #     style_dataset, batch_size = 4,
-        #     sampler=InfiniteSampleWrapper(style_dataset), 
-        #     num_workers=8)
-
-        # image_batch = zip(content, style)
-
-        # load the model
+        trainer = pl.Trainer(max_epochs=1, num_nodes=1, max_steps=200_000)
+        trainer.fit(model, dm)
 
     elif mode == 'test':
         # load the state dict
-        vgg = vgg.vgg
         decoder = decoder.decoder
         transformer = Transformer()
         embedding = PatchEmbedding()
         
-        vgg.load_state_dict(torch.load(args.vgg))
-        vgg = nn.Sequential(*list(vgg.children())[:44])
-
         decoder.eval()
         transformer.eval()
-        vgg.eval()
+        vgg_model.eval()
 
         new_decoder_state_dict = OrderedDict()
         decoder_state_dict = torch.load(args.decoder_path)
@@ -308,7 +232,7 @@ if __name__ == '__main__':
             name = k
             new_decoder_state_dict[name] = v
         
-        decoder.decoder.load_state_dict(new_decoder_state_dict)
+        decoder.load_state_dict(new_decoder_state_dict)
 
         new_embedding_state_dict = OrderedDict()
         embedding_state_dict = torch.load(args.embedding_path)
@@ -328,19 +252,19 @@ if __name__ == '__main__':
 
         transformer.load_state_dict(new_transformer_state_dict)
 
-        network = styTR2.StyTrans(vgg, decoder, embedding, transformer)
+        network = styTR2.StyTrans(vgg_model, decoder, embedding, transformer)
         network.eval()
         network.to(device) # Edit
 
         content = Image.open(args.content).convert('RGB')
         style = Image.open(args.style).convert('RGB')
 
-        content_size = content.size
+        origin_content_size = content.size
 
         content_tf = data_transform(content_size)
         style_tf = data_transform(style_size)
 
-        resize_tf = content_transform(content_size)
+        resize_tf = content_transform((origin_content_size[1], origin_content_size[0]))
 
         content = content_tf(content)
         style = style_tf(style)
@@ -349,9 +273,9 @@ if __name__ == '__main__':
         style = style.to(device).unsqueeze(0)
 
         with torch.no_grad():
-            output_tensor = network(content, style)
+            output_tensor = network(content, style)[0]
 
-        output_tensor.cpu()
+        output_tensor.to('cpu')
 
         output = resize_tf(output_tensor)
 

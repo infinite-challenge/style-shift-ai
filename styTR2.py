@@ -63,17 +63,20 @@ class StyTrans(nn.Module):
         """
         return stylized image and computed losses
         """
+        content_input = sample_c
+        style_input = sample_s
+
         content_features = self.checkpt_of_ecnoder(sample_c)
         style_features = self.checkpt_of_ecnoder(sample_s)
 
-        style = self.embedding(sample_c)
-        content = self.embedding(sample_s)
+        style = self.embedding(sample_s)
+        content = self.embedding(sample_c)
 
         embed_position_c = None
         embed_position_s = None
         mask = None
         hs = self.transformer(style, content, mask, embed_position_c, embed_position_s)
-        Ics = self.decoder(self.transformer(style, content, mask, embed_position_c, embed_position_s))
+        Ics = self.decoder(hs)
         
         Ics_features = self.checkpt_of_ecnoder(Ics)
         loss_c = 0
@@ -88,12 +91,13 @@ class StyTrans(nn.Module):
         Icc = self.decoder(self.transformer(content, content, mask, embed_position_c, embed_position_c))
         Iss = self.decoder(self.transformer(style, style, mask, embed_position_s, embed_position_s))
 
-        Icc_features = self.checkpt_of_ecnoder(Icc)
-        Iss_features = self.checkpt_of_ecnoder(Iss)
 
         loss_l1 = 0
-        for I, sample in zip([Icc, Iss],[sample_c, sample_s]):
+        for I, sample in zip([Icc, Iss],[content_input, style_input]):
             loss_l1 += self.compute_content_loss(I, sample)
+
+        Icc_features = self.checkpt_of_ecnoder(Icc)
+        Iss_features = self.checkpt_of_ecnoder(Iss)
 
         loss_l2 = 0
         for i in range(5):

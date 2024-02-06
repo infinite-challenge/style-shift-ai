@@ -76,6 +76,9 @@ class ImageDataModule(LightningDataModule):
             sampler=InfiniteSampleWrapper(self.style_dataset), 
             num_workers=self.num_workers)
 
+    def __len__(self):
+        return 2 ** 31
+
     def train_dataloader(self):
         return zip(self.content, self.style)
 
@@ -144,4 +147,4 @@ class LitCIFAR10DataModule(LightningDataModule):
             num_workers=self.num_workers,
         )
 
-        return zip(dataloader, dataloader)
+        return dataloader, dataloader
