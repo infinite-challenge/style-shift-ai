@@ -185,6 +185,6 @@ data/
 # pretrained model
 *.pth
 pretrained/
-experiement/
+experiements/
 
 # End of https://www.toptal.com/developers/gitignore/api/python

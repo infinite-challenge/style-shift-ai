@@ -3,7 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 import numpy as np
+from copy import deepcopy
 
+import pdb
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Transformer Model for Style Shift (StyTR2)
@@ -13,8 +15,8 @@ class Transformer(nn.Module):
     def __init__(self, 
                 d_model : int = 512, 
                 nhead : int = 8, 
-                num_encoder_layers : int = 6, 
-                num_decoder_layers : int = 6, 
+                num_encoder_layers : int = 3, 
+                num_decoder_layers : int = 3, 
                 dim_feedforward : int = 2048, 
                 dropout : float = 0.1, 
                 activation : str = "relu", 
@@ -27,8 +29,8 @@ class Transformer(nn.Module):
         encoder_layer = TransformerEncoderLayer(d_model, nhead, dim_feedforward, dropout, activation, normalize_before)
         encoder_norm = nn.LayerNorm(d_model) if normalize_before else None
 
-        self.encoder_content = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
-        self.encoder_style = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+        self.encoder_c = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
+        self.encoder_s = TransformerEncoder(encoder_layer, num_encoder_layers, encoder_norm)
 
         decoder_layer = TransformerDecoderLayer(d_model, nhead, dim_feedforward, dropout, activation, normalize_before)
         decoder_norm = nn.LayerNorm(d_model)
@@ -42,7 +44,7 @@ class Transformer(nn.Module):
         self.nhead = nhead
 
         self.average_pooling = nn.AdaptiveAvgPool2d(18)
-        self.new_pos = nn.Conv2d(512, 512, (1, 1))
+        self.new_ps = nn.Conv2d(512, 512, (1, 1))
 
     # reset parameters
     # description : reset parameters for transformer
@@ -62,7 +64,7 @@ class Transformer(nn.Module):
         
         # positional encoding for content
         content_pool = self.average_pooling(content)
-        pos_content = self.new_pos(content_pool)
+        pos_content = self.new_ps(content_pool)
         pos_embed_content = F.interpolate(pos_content, mode='bilinear', size=style.shape[-2:])
 
         # flattent the style and content
@@ -76,8 +78,8 @@ class Transformer(nn.Module):
             pos_embed_style = pos_embed_style.flatten(2).permute(2, 0, 1)
 
         # transformer encoder and decoder
-        style = self.encoder_style(style, src_key_padding_mask = mask, pos = pos_embed_style)
-        content = self.encoder_content(content, src_key_padding_mask = mask, pos = pos_embed_content)
+        style = self.encoder_s(style, src_key_padding_mask = mask, pos = pos_embed_style)
+        content = self.encoder_c(content, src_key_padding_mask = mask, pos = pos_embed_content)
         
         # transformer decoder
         hidden_state = self.decoder(tgt = content, memory = style, memory_key_padding_mask = mask, 
@@ -86,8 +88,9 @@ class Transformer(nn.Module):
         # (H X W) x N x C -> N x C x H x W
         N, B, C = hidden_state.shape
         W = H = int(np.sqrt(N))
-        hidden_state = hidden_state.permute(1, 2, 0).view(B, C, H, W)
-
+        hidden_state = hidden_state.permute(1, 2, 0)
+        hidden_state = hidden_state.view(B, C, H, W)
+        
         return hidden_state 
 
 # Transformer Encoder and Decoder
@@ -105,7 +108,7 @@ class TransformerEncoder(nn.Module):
         super().__init__()
 
         # layer list is consist of num_layers of encode_layer
-        self.layers = nn.ModuleList([encode_layer for _ in range(num_layers)]) 
+        self.layers = nn.ModuleList([deepcopy(encode_layer) for _ in range(num_layers)]) 
         self.num_layers = num_layers
         self.norm = norm
 
@@ -141,7 +144,7 @@ class TransformerDecoder(nn.Module):
         super().__init__()
 
         # layer list is consist of num_layers of decode_layer
-        self.layers = nn.ModuleList([decode_layer for _ in range(num_layers)]) 
+        self.layers = nn.ModuleList([deepcopy(decode_layer)  for _ in range(num_layers)]) 
         self.num_layers = num_layers
         self.norm = norm
 
@@ -173,24 +176,26 @@ class TransformerDecoder(nn.Module):
         """
 
         # intermediate list (if return_intermediate is True)
+        output = tgt
+
         intermediate = []
 
         for layer in self.layers:
-            tgt = layer(tgt, memory, tgt_mask = tgt_mask, memory_mask = memory_mask, tgt_key_padding_mask = tgt_key_padding_mask, 
+            output = layer(output, memory, tgt_mask = tgt_mask, memory_mask = memory_mask, tgt_key_padding_mask = tgt_key_padding_mask, 
                         memory_key_padding_mask = memory_key_padding_mask, pos = pos, query_pos = query_pos)
             if self.return_intermediate:
-                intermediate.append(self.norm(tgt))
+                intermediate.append(self.norm(output))
 
         if self.norm is not None:
-            tgt = self.norm(tgt)
+            tgt = self.norm(output)
             if self.return_intermediate:
                 intermediate.pop()
-                intermediate.append(tgt)
+                intermediate.append(output)
 
         if self.return_intermediate:
             return torch.stack(intermediate)
 
-        return tgt.unsqueeze(0)
+        return output.unsqueeze(0)
     
 # Transformer Encoder and Decoder Layer
 
@@ -203,17 +208,16 @@ class TransformerEncoderLayer(nn.Module):
                  dim_feedforward : int = 2048, 
                  dropout : float = 0.1, 
                  activation : str = "relu", 
-                 bias : bool = True,
                  normalize_before : bool = False
                  ):
         
         super().__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, bias=bias)
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
 
         # Feed Forward Network
-        self.linear1 = nn.Linear(d_model, dim_feedforward, bias=bias)
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model, bias=bias)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
 
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
@@ -283,18 +287,17 @@ class TransformerDecoderLayer(nn.Module):
                 dim_feedforward : int = 2048, 
                 dropout : float = 0.1, 
                 activation : str = "relu", 
-                bias : bool = True,
                 normalize_before : bool = False
                 ):
         
         super().__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, bias=bias)
-        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, bias=bias)
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
 
         # Feed Forward Network
-        self.linear1 = nn.Linear(d_model, dim_feedforward, bias=bias)
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.dropout = nn.Dropout(dropout)
-        self.linear2 = nn.Linear(dim_feedforward, d_model, bias=bias)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
 
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
@@ -365,9 +368,10 @@ class TransformerDecoderLayer(nn.Module):
         
         q = self.positional_encoding(tgt, query_pos)
         k = self.positional_encoding(memory, pos)
+        v = memory
 
         tgt2 = self.self_attn(
-            q, k, memory, 
+            q, k, v, 
             attn_mask = tgt_mask, 
             key_padding_mask = tgt_key_padding_mask
             )[0]

@@ -19,6 +19,9 @@ def FiniteSampler(n):
     for i in range(n):
         yield order[i]
 
+    # if num_samples is 10, then length of the sampler is 10
+
+
 class InfiniteSampleWrapper(data.sampler.Sampler):
     def __init__(self, data_source):
         super().__init__(data_source)
