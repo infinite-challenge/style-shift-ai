@@ -48,9 +48,9 @@ parser.add_argument('--mode', type=str, default='test',
                     help='The mode of the model (train/test)')
 
 parser.add_argument('--vgg', type=str, default='./experiments/vgg_normalised.pth')
-parser.add_argument('--decoder_path', type=str, default='experiments/decoder_iter_160000.pth')
-parser.add_argument('--trans_path', type=str, default='experiments/transformer_iter_160000.pth')
-parser.add_argument('--embedding_path', type=str, default='experiments/embedding_iter_160000.pth')
+parser.add_argument('--decoder_path', type=str, default='experiments/decoder_iter_10100.pth')
+parser.add_argument('--trans_path', type=str, default='experiments/transformer_iter_10100.pth')
+parser.add_argument('--embedding_path', type=str, default='experiments/embedding_iter_10100.pth')
 
 parser.add_argument('--lr', type=float, default=5e-4)
 parser.add_argument('--lr_decay', type=float, default=1e-5)
@@ -60,6 +60,7 @@ parser.add_argument('--position_embedding', default='sine', type=str, choices=('
                     help='type of positional embedding to use on top of the image features')
 parser.add_argument('--hidden_dim', default=512, type=int,
                     help='size of the embeddings (dimensions of the transformer)')
+parser.add_argument('--batch_size', default=4, type=int)
 args = parser.parse_args()
 
 content_size = (512, 512)
@@ -160,10 +161,10 @@ class LightningStyleShift(pl.LightningModule):
         return self.model(content, style)
 
     def on_train_batch_end(self, output, batch, batch_idx): 
-
-        output_file = f'{self.output_path}/img/batch_{batch_idx}'
-        for i, img in enumerate(self.training_step_outputs):    
-            save_image(img, output_file+f'_{i}.jpg')
+        if batch_idx % 10 == 0:
+            output_file = f'{self.output_path}/img/batch_{batch_idx}'
+            for i, img in enumerate(self.training_step_outputs):    
+                save_image(img, output_file+f'_{i}.jpg')
 
         if batch_idx % 100 == 0 and batch_idx > 0:
             transformer_dict = self.model.transformer.state_dict()
@@ -211,7 +212,7 @@ if __name__ == '__main__':
     if mode == 'train':  
 
         model = LightningStyleShift(vgg_model, decoder.decoder, PatchEmbedding(), Transformer(), content_weight, style_weight, l_identity1_weight, l_identity2_weight, args.lr, args.lr_decay, output_path)
-        dm = ImageDataModule(args.content, args.style, batch_size = 4, num_workers = NUM_WORKERS)
+        dm = ImageDataModule(args.content, args.style, batch_size = args.batch_size, num_workers = NUM_WORKERS)
 
         trainer = pl.Trainer(max_epochs=1, num_nodes=1, max_steps=200_000)
         trainer.fit(model, dm)
