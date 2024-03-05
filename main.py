@@ -190,23 +190,6 @@ def imgtensor2pil(img_tensor):
     pil_img = transforms.ToPILImage()(img_tensor)
     return pil_img
 
-mode = args.mode
-output_path = args.output
-
-content_weight : float = 7.0
-style_weight : float = 10.0
-l_identity1_weight : float = 70.0
-l_identity2_weight : float = 1.0
-
-if not os.path.exists(output_path):
-    os.makedirs(output_path)
-
-if not os.path.exists(output_path + '/img'):
-    os.makedirs(output_path + '/img')
-
-if not os.path.exists(output_path + '/trained'):
-    os.makedirs(output_path + '/trained')
-
 def test(vgg_path : str ,
          decoder_path : str, 
          embedding_path : str, 
@@ -216,6 +199,9 @@ def test(vgg_path : str ,
          output_path : str
          ):
     
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
     vgg_model = Vgg
     vgg_model.load_state_dict(torch.load(vgg_path))
     vgg_model = nn.Sequential(*list(vgg_model.children())[:44])
@@ -281,15 +267,14 @@ def test(vgg_path : str ,
 
     output = resize_tf(output_tensor)
 
-    output_name = '{:s}/{:s}_stylized_{:s}{:s}'.format(output_path, splitext(basename(args.content))[0],
-                                                    splitext(basename(args.style))[0], save_extension)
+    output_name = '{:s}/{:s}_stylized_{:s}{:s}'.format(output_path, splitext(basename(content_path))[0],
+                                                    splitext(basename(style_path))[0], save_extension)
 
     save_image(output, output_name)
 
 if __name__ == '__main__':
 
     mode = args.mode
-    
     vgg_path = args.vgg
     decoder_path = args.decoder_path
     embedding_path = args.embedding_path
@@ -298,7 +283,23 @@ if __name__ == '__main__':
     style_path = args.style
     output_path = args.output
 
+    content_weight : float = 7.0
+    style_weight : float = 10.0
+    l_identity1_weight : float = 70.0
+    l_identity2_weight : float = 1.0
+
     if mode == 'train':  
+
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+
+        if not os.path.exists(output_path + '/img'):
+            os.makedirs(output_path + '/img')   
+
+        if not os.path.exists(output_path + '/trained'):
+            os.makedirs(output_path + '/trained')
+
+
 
         vgg_model = Vgg
         vgg_model.load_state_dict(torch.load(vgg_path))
