@@ -14,8 +14,8 @@ from torch.utils import data
 from torchvision import transforms
 from torchvision.utils import save_image
 
-import model.decoder as decoder
-import model.vgg as vgg
+from model.decoder import decoder as Decoder
+from model.vgg import vgg as Vgg
 from model.patch_embedding import PatchEmbedding
 from model.transformer import Transformer
 from utils import data_transform, content_transform, img_tensor_2_pil
@@ -207,15 +207,104 @@ if not os.path.exists(output_path + '/img'):
 if not os.path.exists(output_path + '/trained'):
     os.makedirs(output_path + '/trained')
 
+def test(vgg_path : str ,
+         decoder_path : str, 
+         embedding_path : str, 
+         trans_path : str, 
+         content_path : str, 
+         style_path : str, 
+         output_path : str
+         ):
+    
+    vgg_model = Vgg
+    vgg_model.load_state_dict(torch.load(vgg_path))
+    vgg_model = nn.Sequential(*list(vgg_model.children())[:44])
+
+    decoder = Decoder
+    transformer = Transformer()
+    embedding = PatchEmbedding()
+    
+    decoder.eval()
+    transformer.eval()
+    vgg_model.eval()
+
+    new_decoder_state_dict = OrderedDict()
+    decoder_state_dict = torch.load(decoder_path)
+    for k, v in decoder_state_dict.items():
+        name = k
+        new_decoder_state_dict[name] = v
+    
+    decoder.load_state_dict(new_decoder_state_dict)
+
+    new_embedding_state_dict = OrderedDict()
+    embedding_state_dict = torch.load(embedding_path)
+
+    for k, v in embedding_state_dict.items():
+        name = k
+        new_embedding_state_dict[name] = v
+
+    embedding.load_state_dict(new_embedding_state_dict)
+
+    new_transformer_state_dict = OrderedDict()
+    transformer_state_dict = torch.load(trans_path)
+
+    for k, v in transformer_state_dict.items():
+        name = k
+        new_transformer_state_dict[name] = v
+
+    transformer.load_state_dict(new_transformer_state_dict)
+
+    network = styTR2.StyTrans(vgg_model, decoder, embedding, transformer)
+    network.eval()
+    network.to(device) # Edit
+
+    content = Image.open(content_path).convert('RGB')
+    style = Image.open(style_path).convert('RGB')
+
+    origin_content_size = content.size
+
+    content_tf = data_transform(content_size)
+    style_tf = data_transform(style_size)
+
+    resize_tf = content_transform((origin_content_size[1], origin_content_size[0]))
+
+    content = content_tf(content)
+    style = style_tf(style)
+
+    content = content.to(device).unsqueeze(0)
+    style = style.to(device).unsqueeze(0)
+
+    with torch.no_grad():
+        output_tensor = network(content, style)[0]
+
+    output_tensor.to('cpu')
+
+    output = resize_tf(output_tensor)
+
+    output_name = '{:s}/{:s}_stylized_{:s}{:s}'.format(output_path, splitext(basename(args.content))[0],
+                                                    splitext(basename(args.style))[0], save_extension)
+
+    save_image(output, output_name)
+
 if __name__ == '__main__':
 
-    vgg_model = vgg.vgg 
-    vgg_model.load_state_dict(torch.load(args.vgg))
-    vgg_model = nn.Sequential(*list(vgg_model.children())[:44])
+    mode = args.mode
+    
+    vgg_path = args.vgg
+    decoder_path = args.decoder_path
+    embedding_path = args.embedding_path
+    trans_path = args.trans_path
+    content_path = args.content
+    style_path = args.style
+    output_path = args.output
 
     if mode == 'train':  
 
-        model = LightningStyleShift(vgg_model, decoder.decoder, PatchEmbedding(), Transformer(), content_weight, style_weight, l_identity1_weight, l_identity2_weight, args.lr, args.lr_decay, output_path)
+        vgg_model = Vgg
+        vgg_model.load_state_dict(torch.load(vgg_path))
+        vgg_model = nn.Sequential(*list(vgg_model.children())[:44])
+
+        model = LightningStyleShift(vgg_model, Decoder, PatchEmbedding(), Transformer(), content_weight, style_weight, l_identity1_weight, l_identity2_weight, args.lr, args.lr_decay, output_path)
         dm = ImageDataModule(args.content, args.style, batch_size = args.batch_size, num_workers = NUM_WORKERS)
 
         checkpoint_callback = ModelCheckpoint(
@@ -228,69 +317,4 @@ if __name__ == '__main__':
         trainer.fit(model, dm, ckpt_path=args.ckpt_path)
 
     elif mode == 'test':
-        # load the state dict
-        decoder = decoder.decoder
-        transformer = Transformer()
-        embedding = PatchEmbedding()
-        
-        decoder.eval()
-        transformer.eval()
-        vgg_model.eval()
-
-        new_decoder_state_dict = OrderedDict()
-        decoder_state_dict = torch.load(args.decoder_path)
-        for k, v in decoder_state_dict.items():
-            name = k
-            new_decoder_state_dict[name] = v
-        
-        decoder.load_state_dict(new_decoder_state_dict)
-
-        new_embedding_state_dict = OrderedDict()
-        embedding_state_dict = torch.load(args.embedding_path)
-
-        for k, v in embedding_state_dict.items():
-            name = k
-            new_embedding_state_dict[name] = v
-
-        embedding.load_state_dict(new_embedding_state_dict)
-
-        new_transformer_state_dict = OrderedDict()
-        transformer_state_dict = torch.load(args.trans_path)
-
-        for k, v in transformer_state_dict.items():
-            name = k
-            new_transformer_state_dict[name] = v
-
-        transformer.load_state_dict(new_transformer_state_dict)
-
-        network = styTR2.StyTrans(vgg_model, decoder, embedding, transformer)
-        network.eval()
-        network.to(device) # Edit
-
-        content = Image.open(args.content).convert('RGB')
-        style = Image.open(args.style).convert('RGB')
-
-        origin_content_size = content.size
-
-        content_tf = data_transform(content_size)
-        style_tf = data_transform(style_size)
-
-        resize_tf = content_transform((origin_content_size[1], origin_content_size[0]))
-
-        content = content_tf(content)
-        style = style_tf(style)
-
-        content = content.to(device).unsqueeze(0)
-        style = style.to(device).unsqueeze(0)
-
-        with torch.no_grad():
-            output_tensor = network(content, style)[0]
-
-        output_tensor.to('cpu')
-
-        output = resize_tf(output_tensor)
-
-        output_name = '{:s}/{:s}_stylized_{:s}{:s}'.format(output_path, splitext(basename(args.content))[0],
-                                                        splitext(basename(args.style))[0], save_extension)
-
-        save_image(output, output_name)
+        test(vgg_path, decoder_path, embedding_path, trans_path, content_path, style_path, output_path)
