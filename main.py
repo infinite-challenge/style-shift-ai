@@ -25,6 +25,8 @@ import styTR2
 from collections import OrderedDict
 import argparse
 import lightning as pl
+from lightning.pytorch.callbacks import ModelCheckpoint
+
 from collections import OrderedDict
 
 from dataloader import ImageDataModule, LitCIFAR10DataModule, CustomImageDataset
@@ -48,9 +50,9 @@ parser.add_argument('--mode', type=str, default='test',
                     help='The mode of the model (train/test)')
 
 parser.add_argument('--vgg', type=str, default='./experiments/vgg_normalised.pth')
-parser.add_argument('--decoder_path', type=str, default='experiments/decoder_iter_10100.pth')
-parser.add_argument('--trans_path', type=str, default='experiments/transformer_iter_10100.pth')
-parser.add_argument('--embedding_path', type=str, default='experiments/embedding_iter_10100.pth')
+parser.add_argument('--decoder_path', type=str, default='experiments/decoder.pth')
+parser.add_argument('--trans_path', type=str, default='experiments/transformer.pth')
+parser.add_argument('--embedding_path', type=str, default='experiments/embedding.pth')
 
 parser.add_argument('--lr', type=float, default=5e-4)
 parser.add_argument('--lr_decay', type=float, default=1e-5)
@@ -61,6 +63,8 @@ parser.add_argument('--position_embedding', default='sine', type=str, choices=('
 parser.add_argument('--hidden_dim', default=512, type=int,
                     help='size of the embeddings (dimensions of the transformer)')
 parser.add_argument('--batch_size', default=4, type=int)
+parser.add_argument('--ckpt_path', default=None, type=str)
+
 args = parser.parse_args()
 
 content_size = (512, 512)
@@ -214,8 +218,14 @@ if __name__ == '__main__':
         model = LightningStyleShift(vgg_model, decoder.decoder, PatchEmbedding(), Transformer(), content_weight, style_weight, l_identity1_weight, l_identity2_weight, args.lr, args.lr_decay, output_path)
         dm = ImageDataModule(args.content, args.style, batch_size = args.batch_size, num_workers = NUM_WORKERS)
 
-        trainer = pl.Trainer(max_epochs=1, num_nodes=1, max_steps=200_000)
-        trainer.fit(model, dm)
+        checkpoint_callback = ModelCheckpoint(
+            every_n_train_steps=100,
+            dirpath="checkpoints/",
+            auto_insert_metric_name=True
+        )
+
+        trainer = pl.Trainer(max_epochs=1, num_nodes=1, max_steps=200_000, enable_checkpointing=True, callbacks=[checkpoint_callback])
+        trainer.fit(model, dm, ckpt_path=args.ckpt_path)
 
     elif mode == 'test':
         # load the state dict
