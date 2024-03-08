@@ -1,6 +1,6 @@
 import os
 from PIL import Image
-from model.sampler import InfiniteSampleWrapper
+from .model.sampler import InfiniteSampleWrapper
 from torchvision import transforms
 from pathlib import Path
 from torch.utils.data import Dataset, random_split, DataLoader
