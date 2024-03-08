@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils import to_2tuple
+from ..utils import to_2tuple
 
 ############################
 # Image to patch embedding #

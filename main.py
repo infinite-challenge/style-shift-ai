@@ -14,13 +14,13 @@ from torch.utils import data
 from torchvision import transforms
 from torchvision.utils import save_image
 
-from model.decoder import decoder as Decoder
-from model.vgg import vgg as Vgg
-from model.patch_embedding import PatchEmbedding
-from model.transformer import Transformer
-from utils import data_transform, content_transform, img_tensor_2_pil
+from .model.decoder import decoder as Decoder
+from .model.vgg import vgg as Vgg
+from .model.patch_embedding import PatchEmbedding
+from .model.transformer import Transformer
+from .utils import data_transform, content_transform, img_tensor_2_pil
 
-import styTR2
+from . import styTR2
 
 from collections import OrderedDict
 import argparse
@@ -29,51 +29,17 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 
 from collections import OrderedDict
 
-from dataloader import ImageDataModule, LitCIFAR10DataModule, CustomImageDataset
-from model.sampler import InfiniteSampleWrapper
+from .dataloader import ImageDataModule, LitCIFAR10DataModule, CustomImageDataset
+from .model.sampler import InfiniteSampleWrapper
 
 from tqdm import tqdm
 import pdb
-
-parser = argparse.ArgumentParser()
-
-parser.add_argument('--content', type=str,
-                    help='File path to the content image')
-parser.add_argument('--style', type=str,
-                    help='File path to the style image or multiple style \
-                    images separated by commas if you want to do style \
-                    interpolation or spatial control')
-parser.add_argument('--output', type=str, default='output',
-                    help='Directory to save the output images')
-
-parser.add_argument('--mode', type=str, default='test',
-                    help='The mode of the model (train/test)')
-
-parser.add_argument('--vgg', type=str, default='./experiments/vgg_normalised.pth')
-parser.add_argument('--decoder_path', type=str, default='experiments/decoder.pth')
-parser.add_argument('--trans_path', type=str, default='experiments/transformer.pth')
-parser.add_argument('--embedding_path', type=str, default='experiments/embedding.pth')
-
-parser.add_argument('--lr', type=float, default=5e-4)
-parser.add_argument('--lr_decay', type=float, default=1e-5)
-parser.add_argument('--style_interpolation_weight', type=str, default="")
-parser.add_argument('--a', type=float, default=1.0)
-parser.add_argument('--position_embedding', default='sine', type=str, choices=('sine','learned'),
-                    help='type of positional embedding to use on top of the image features')
-parser.add_argument('--hidden_dim', default=512, type=int,
-                    help='size of the embeddings (dimensions of the transformer)')
-parser.add_argument('--batch_size', default=4, type=int)
-parser.add_argument('--ckpt_path', default=None, type=str)
-
-args = parser.parse_args()
 
 content_size = (512, 512)
 style_size = (512, 512)
 crop_size = 256
 save_extension = '.jpg'
-output_path = args.output
 preserve_color = 'store_true'
-alpha = args.a
 NUM_WORKERS=int(os.cpu_count()/2)
 
 random_seed = 42
@@ -269,10 +235,45 @@ def test(vgg_path : str ,
 
     output_name = '{:s}/{:s}_stylized_{:s}{:s}'.format(output_path, splitext(basename(content_path))[0],
                                                     splitext(basename(style_path))[0], save_extension)
-
+    
     save_image(output, output_name)
 
+    return output_name
+
 if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--content', type=str, default="",
+                        help='File path to the content image')
+    parser.add_argument('--style', type=str, default="",
+                        help='File path to the style image or multiple style \
+                        images separated by commas if you want to do style \
+                        interpolation or spatial control')
+    parser.add_argument('--output', type=str, default='output',
+                        help='Directory to save the output images')
+
+    parser.add_argument('--mode', type=str, default='test',
+                        help='The mode of the model (train/test)')
+
+    parser.add_argument('--vgg', type=str, default='./experiments/vgg_normalised.pth')
+    parser.add_argument('--decoder_path', type=str, default='experiments/decoder.pth')
+    parser.add_argument('--trans_path', type=str, default='experiments/transformer.pth')
+    parser.add_argument('--embedding_path', type=str, default='experiments/embedding.pth')
+
+    parser.add_argument('--lr', type=float, default=5e-4)
+    parser.add_argument('--lr_decay', type=float, default=1e-5)
+    parser.add_argument('--style_interpolation_weight', type=str, default="")
+    parser.add_argument('--a', type=float, default=1.0)
+    parser.add_argument('--position_embedding', default='sine', type=str, choices=('sine','learned'),
+                        help='type of positional embedding to use on top of the image features')
+    parser.add_argument('--hidden_dim', default=512, type=int,
+                        help='size of the embeddings (dimensions of the transformer)')
+    parser.add_argument('--batch_size', default=4, type=int)
+    parser.add_argument('--ckpt_path', default=None, type=str)
+
+    args = parser.parse_args()
+
 
     mode = args.mode
     vgg_path = args.vgg
